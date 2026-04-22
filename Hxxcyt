@@ -1,0 +1,234 @@
+-- Brookhaven Realistic Car Physics Script
+-- Supports Mobile & PC
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Settings
+local settings = {
+    enabled = false,
+    tiltIntensity = 0.15,
+    bounceIntensity = 0.08,
+    returnSpeed = 0.1,
+    maxTilt = 25
+}
+
+-- Create GUI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "CarPhysicsGUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+-- Main Frame
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 200, 0, 120)
+mainFrame.Position = UDim2.new(0.02, 0, 0.4, 0)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
+
+-- Corner UI
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 10)
+corner.Parent = mainFrame
+
+-- Title
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 35)
+title.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+title.BorderSizePixel = 0
+title.Text = "🚗 Car Physics"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 16
+title.Parent = mainFrame
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 10)
+titleCorner.Parent = title
+
+-- Toggle Button
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(0, 160, 0, 40)
+toggleButton.Position = UDim2.new(0.5, -80, 0, 50)
+toggleButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
+toggleButton.BorderSizePixel = 0
+toggleButton.Text = "OFF"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.TextSize = 18
+toggleButton.Parent = mainFrame
+
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(0, 8)
+toggleCorner.Parent = toggleButton
+
+-- Status Label
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -20, 0, 20)
+statusLabel.Position = UDim2.new(0, 10, 1, -25)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Status: Disabled"
+statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextSize = 12
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Parent = mainFrame
+
+-- Variables
+local currentCar = nil
+local originalCFrame = nil
+local velocity = Vector3.new(0, 0, 0)
+local lastPosition = nil
+local connection = nil
+
+-- Functions
+local function updateToggleButton()
+    if settings.enabled then
+        toggleButton.BackgroundColor3 = Color3.fromRGB(50, 220, 50)
+        toggleButton.Text = "ON"
+        statusLabel.Text = "Status: Active"
+    else
+        toggleButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50)
+        toggleButton.Text = "OFF"
+        statusLabel.Text = "Status: Disabled"
+    end
+end
+
+local function findCar()
+    local character = player.Character
+    if not character then return nil end
+    
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return nil end
+    
+    -- Cari mobil terdekat
+    for _, v in pairs(workspace:GetDescendants()) do
+        if v:IsA("VehicleSeat") and v.Occupant then
+            if v.Occupant.Parent == character then
+                return v.Parent
+            end
+        end
+    end
+    
+    return nil
+end
+
+local function applyCarPhysics()
+    if not settings.enabled then return end
+    if not currentCar then return end
+    
+    local primaryPart = currentCar.PrimaryPart or currentCar:FindFirstChildWhichIsA("BasePart")
+    if not primaryPart then return end
+    
+    local currentPosition = primaryPart.Position
+    
+    if lastPosition then
+        -- Calculate velocity
+        velocity = (currentPosition - lastPosition) * 60 -- Approximate velocity
+        
+        -- Calculate tilt based on velocity change
+        local lateralVelocity = Vector3.new(velocity.X, 0, velocity.Z)
+        local speed = lateralVelocity.Magnitude
+        
+        if speed > 5 then -- Only apply physics when moving
+            -- Tilt effect
+            local tiltX = math.clamp(-velocity.Z * settings.tiltIntensity, -settings.maxTilt, settings.maxTilt)
+            local tiltZ = math.clamp(velocity.X * settings.tiltIntensity, -settings.maxTilt, settings.maxTilt)
+            
+            -- Bounce effect (vertical)
+            local bounceY = math.sin(tick() * 10) * settings.bounceIntensity * (speed / 10)
+            
+            -- Apply rotation
+            for _, part in pairs(currentCar:GetDescendants()) do
+                if part:IsA("BasePart") and not part:IsA("VehicleSeat") then
+                    local currentCF = part.CFrame
+                    local offset = CFrame.Angles(
+                        math.rad(tiltX),
+                        0,
+                        math.rad(tiltZ)
+                    ) * CFrame.new(0, bounceY, 0)
+                    
+                    part.CFrame = currentCF:Lerp(currentCF * offset, settings.returnSpeed)
+                end
+            end
+        else
+            -- Return to normal slowly
+            for _, part in pairs(currentCar:GetDescendants()) do
+                if part:IsA("BasePart") and not part:IsA("VehicleSeat") then
+                    local currentCF = part.CFrame
+                    local targetCF = CFrame.new(currentCF.Position) * CFrame.Angles(0, currentCF:ToEulerAnglesXYZ())
+                    part.CFrame = currentCF:Lerp(targetCF, settings.returnSpeed * 0.5)
+                end
+            end
+        end
+    end
+    
+    lastPosition = currentPosition
+end
+
+local function startPhysics()
+    if connection then
+        connection:Disconnect()
+    end
+    
+    connection = RunService.Heartbeat:Connect(function()
+        currentCar = findCar()
+        if currentCar and settings.enabled then
+            applyCarPhysics()
+        else
+            lastPosition = nil
+        end
+    end)
+end
+
+-- Toggle Function
+toggleButton.MouseButton1Click:Connect(function()
+    settings.enabled = not settings.enabled
+    updateToggleButton()
+    
+    if settings.enabled then
+        startPhysics()
+    else
+        if connection then
+            connection:Disconnect()
+        end
+        lastPosition = nil
+    end
+end)
+
+-- Mobile Support - Touch
+toggleButton.TouchTap:Connect(function()
+    settings.enabled = not settings.enabled
+    updateToggleButton()
+    
+    if settings.enabled then
+        startPhysics()
+    else
+        if connection then
+            connection:Disconnect()
+        end
+        lastPosition = nil
+    end
+end)
+
+-- Initialize
+updateToggleButton()
+startPhysics()
+
+-- Notification
+game:GetService("StarterGui"):SetCore("SendNotification", {
+    Title = "Car Physics Loaded!";
+    Text = "Toggle the GUI to enable realistic car physics";
+    Duration = 5;
+})
+
+print("✅ Brookhaven Car Physics Script Loaded!")
+print("📱 Mobile & PC Supported")
+print("🚗 Drive fast to see the effects!")
